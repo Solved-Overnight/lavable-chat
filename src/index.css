@@ -100,4 +100,37 @@
   .text-gradient {
     @apply bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent;
   }
+  
+  .animated-gradient {
+    background-size: 200% 200%;
+    animation: gradient-animation 5s ease infinite;
+  }
+  
+  .glass-effect {
+    @apply bg-white/10 backdrop-blur-md border border-white/20;
+  }
+  
+  .dark .glass-effect {
+    @apply bg-black/10 border-black/20;
+  }
+  
+  .shape-animation {
+    @apply transition-all duration-500;
+  }
+  
+  .shape-animation:hover {
+    @apply scale-110 rotate-12;
+  }
+}
+
+@keyframes gradient-animation {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
 }

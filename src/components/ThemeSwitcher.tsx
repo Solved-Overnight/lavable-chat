@@ -12,13 +12,15 @@ const ThemeSwitcher = () => {
       variant="ghost" 
       size="icon" 
       onClick={toggleTheme} 
-      className="rounded-full"
+      className="rounded-full relative overflow-hidden transition-all duration-300 hover:bg-accent"
     >
-      {themeMode === "light" ? (
-        <Moon className="h-5 w-5" />
-      ) : (
-        <Sun className="h-5 w-5" />
-      )}
+      <div className="relative transition-all duration-500 transform">
+        {themeMode === "light" ? (
+          <Moon className="h-5 w-5 animate-fade-in" />
+        ) : (
+          <Sun className="h-5 w-5 animate-fade-in" />
+        )}
+      </div>
       <span className="sr-only">Toggle theme</span>
     </Button>
   );
