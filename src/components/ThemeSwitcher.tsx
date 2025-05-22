@@ -12,9 +12,9 @@ const ThemeSwitcher = () => {
       variant="ghost" 
       size="icon" 
       onClick={toggleTheme} 
-      className="rounded-full relative overflow-hidden transition-all duration-300 hover:bg-accent"
+      className="rounded-full relative overflow-hidden transition-all duration-300 hover:bg-accent group"
     >
-      <div className="relative transition-all duration-500 transform">
+      <div className="relative transition-all duration-500 transform group-hover:rotate-12">
         {themeMode === "light" ? (
           <Moon className="h-5 w-5 animate-fade-in" />
         ) : (
