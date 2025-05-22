@@ -69,7 +69,7 @@ const VideoFrame: React.FC<VideoFrameProps> = ({
   }, [isLocal, user]);
 
   const toggleMute = () => {
-    setIsMuted(!isMuted);
+    setIsMuted((prev) => !prev);
     if (videoRef.current && videoRef.current.srcObject) {
       const audioTracks = (videoRef.current.srcObject as MediaStream).getAudioTracks();
       audioTracks.forEach(track => {
@@ -79,7 +79,7 @@ const VideoFrame: React.FC<VideoFrameProps> = ({
   };
   
   const toggleVideo = () => {
-    setIsVideoEnabled(!isVideoEnabled);
+    setIsVideoEnabled((prev) => !prev);
     if (videoRef.current && videoRef.current.srcObject) {
       const videoTracks = (videoRef.current.srcObject as MediaStream).getVideoTracks();
       videoTracks.forEach(track => {
@@ -91,7 +91,7 @@ const VideoFrame: React.FC<VideoFrameProps> = ({
   return (
     <div 
       className={cn(
-        "relative rounded-xl overflow-hidden transition-all duration-300",
+        "relative rounded-xl overflow-hidden transition-all duration-300 bg-gradient-to-br from-secondary/30 to-accent/30",
         isActive ? "border-2 border-primary shadow-lg shadow-primary/20" : "border border-border",
         className
       )}
@@ -105,23 +105,23 @@ const VideoFrame: React.FC<VideoFrameProps> = ({
           className="w-full h-full object-cover"
         />
       ) : (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary/30">
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-secondary/30 backdrop-blur-sm">
           {isConnecting ? (
-            <div className="flex flex-col items-center animate-pulse">
-              <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-2">
-                <div className="w-10 h-10 rounded-full bg-primary/40"></div>
+            <div className="flex flex-col items-center">
+              <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-2 animate-pulse">
+                <div className="w-10 h-10 rounded-full bg-primary/40 animate-pulse"></div>
               </div>
               <p className="text-sm text-muted-foreground">Connecting...</p>
             </div>
           ) : (
             <>
-              <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center">
-                <UserCircle className="w-16 h-16 text-muted-foreground" />
+              <div className="w-24 h-24 rounded-full bg-muted flex items-center justify-center animate-pulse-subtle">
+                <UserCircle className="w-20 h-20 text-muted-foreground" />
               </div>
-              <p className="mt-3 text-sm font-medium text-foreground">
+              <p className="mt-4 text-base font-medium text-foreground">
                 {user?.nickname || "Anonymous"} {isLocal ? "(You)" : ""}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-1 text-sm text-muted-foreground">
                 {isLocal ? "Camera off" : "Video unavailable"}
               </p>
             </>
@@ -129,19 +129,19 @@ const VideoFrame: React.FC<VideoFrameProps> = ({
         </div>
       )}
       
-      <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/70 to-transparent">
+      <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent backdrop-blur-sm">
         <div className="flex justify-between items-center">
           <span className="text-sm font-medium px-2 text-white">
             {user?.nickname || "Anonymous"} {isLocal ? "(You)" : ""}
           </span>
           
-          {showControls && hasVideo && (
-            <div className="flex space-x-2">
+          {showControls && (
+            <div className="flex space-x-3">
               <Button
                 onClick={toggleMute}
                 size="icon"
-                variant="secondary"
-                className="h-8 w-8 rounded-full bg-black/50 hover:bg-primary hover:text-primary-foreground"
+                variant={isMuted ? "destructive" : "secondary"}
+                className="h-8 w-8 rounded-full shadow-lg hover:scale-110 transition-transform"
               >
                 {isMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
               </Button>
@@ -149,8 +149,8 @@ const VideoFrame: React.FC<VideoFrameProps> = ({
               <Button
                 onClick={toggleVideo}
                 size="icon"
-                variant="secondary"
-                className="h-8 w-8 rounded-full bg-black/50 hover:bg-primary hover:text-primary-foreground"
+                variant={isVideoEnabled ? "secondary" : "destructive"}
+                className="h-8 w-8 rounded-full shadow-lg hover:scale-110 transition-transform"
               >
                 {isVideoEnabled ? <Camera className="h-4 w-4" /> : <CameraOff className="h-4 w-4" />}
               </Button>
@@ -160,7 +160,7 @@ const VideoFrame: React.FC<VideoFrameProps> = ({
       </div>
       
       {isActive && (
-        <div className="absolute top-2 left-2 px-2 py-1 bg-primary/90 text-primary-foreground text-xs font-medium rounded-full animate-pulse">
+        <div className="absolute top-2 left-2 px-3 py-1 bg-primary text-primary-foreground text-xs font-medium rounded-full shadow-lg animate-pulse-subtle">
           {isLocal ? "Broadcasting" : "Connected"}
         </div>
       )}

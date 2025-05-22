@@ -1,10 +1,30 @@
 
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import { useToast } from "@/components/ui/use-toast";
+import { auth, database } from "@/lib/firebase";
+import { 
+  ref, 
+  set, 
+  onValue, 
+  push, 
+  remove, 
+  update, 
+  serverTimestamp, 
+  onDisconnect 
+} from "firebase/database";
+import { 
+  createUserWithEmailAndPassword, 
+  signInAnonymously, 
+  signOut, 
+  onAuthStateChanged 
+} from "firebase/auth";
 
 export type User = {
   id: string;
   nickname: string;
+  isOnline?: boolean;
+  lastActive?: number;
+  status?: "available" | "busy" | "away";
 };
 
 export type ChatMessage = {
@@ -37,7 +57,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUserState] = useState<User | null>(null);
   const [partner, setPartner] = useState<User | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -45,175 +65,318 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [onlineUserCount, setOnlineUserCount] = useState(0);
   const { toast } = useToast();
 
-  // Simulate fluctuating online user count
-  useEffect(() => {
-    // Initialize with a random number between 50-150
-    setOnlineUserCount(Math.floor(Math.random() * 100) + 50);
-    
-    // Update every 30 seconds with small variations
-    const interval = setInterval(() => {
-      setOnlineUserCount(prev => {
-        // Random fluctuation between -5 and +5 users
-        const change = Math.floor(Math.random() * 11) - 5;
-        return Math.max(20, prev + change); // Ensure at least 20 users online
-      });
-    }, 30000);
-    
-    return () => clearInterval(interval);
-  }, []);
-  
-  // Real-time simulation - occasionally show a toast when new users join
-  useEffect(() => {
-    if (!user) return;
-    
-    const interval = setInterval(() => {
-      // 15% chance of showing a toast about a new user
-      if (Math.random() < 0.15) {
-        const randomNames = ["Jamie", "Alex", "Riley", "Jordan", "Taylor", "Casey", "Avery", "Quinn"];
-        const randomName = randomNames[Math.floor(Math.random() * randomNames.length)];
+  // Set user and register in Firebase
+  const setUser = async (userData: User | null) => {
+    if (userData) {
+      try {
+        // Sign in anonymously to Firebase
+        const userCredential = await signInAnonymously(auth);
+        const firebaseUserId = userCredential.user.uid;
+        
+        // Update user data with Firebase ID
+        const updatedUser = {
+          ...userData,
+          id: firebaseUserId,
+          isOnline: true,
+          lastActive: Date.now(),
+          status: "available" as const
+        };
+
+        // Add user to online users list in Firebase
+        await set(ref(database, `users/${firebaseUserId}`), updatedUser);
+
+        // Set up disconnect handling to automatically set offline status
+        const userStatusRef = ref(database, `users/${firebaseUserId}`);
+        await onDisconnect(userStatusRef).update({
+          isOnline: false,
+          lastActive: serverTimestamp(),
+          status: "away"
+        });
+
+        // Update local state
+        setUserState(updatedUser);
         
         toast({
-          title: "New user online",
-          description: `${randomName} just joined VibeChat`,
-          duration: 3000,
+          title: "Welcome to VibeChat!",
+          description: "You are now online and ready to chat.",
         });
-        
-        // Also increase the online count
-        setOnlineUserCount(prev => prev + 1);
+      } catch (error) {
+        console.error("Error setting up user:", error);
+        toast({
+          title: "Error signing in",
+          description: "There was a problem connecting to the chat service.",
+          variant: "destructive",
+        });
+        setUserState(userData); // Fall back to offline mode
       }
-    }, 45000); // Check every 45 seconds
+    } else {
+      // User is logging out, remove from Firebase
+      if (user?.id) {
+        try {
+          await remove(ref(database, `users/${user.id}`));
+          await signOut(auth);
+        } catch (error) {
+          console.error("Error signing out:", error);
+        }
+      }
+      setUserState(null);
+    }
+  };
+
+  // Monitor online users count
+  useEffect(() => {
+    const usersRef = ref(database, 'users');
+    const unsubscribe = onValue(usersRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const usersData = snapshot.val();
+        const onlineUsers = Object.values(usersData).filter((user: any) => user.isOnline);
+        setOnlineUserCount(onlineUsers.length);
+        
+        // If a new user joins while you're online, show a toast
+        if (user && onlineUsers.length > onlineUserCount && onlineUserCount > 0) {
+          const newUsers = onlineUsers.filter((onlineUser: any) => 
+            !onlineUser.lastActive || 
+            Date.now() - onlineUser.lastActive < 5000
+          );
+          
+          if (newUsers.length > 0) {
+            const randomNewUser = newUsers[Math.floor(Math.random() * newUsers.length)] as any;
+            if (randomNewUser.id !== user.id) {
+              toast({
+                title: "New user online",
+                description: `${randomNewUser.nickname} just joined VibeChat`,
+                duration: 3000,
+              });
+            }
+          }
+        }
+      } else {
+        setOnlineUserCount(0);
+      }
+    });
     
-    return () => clearInterval(interval);
-  }, [user, toast]);
-  
-  // Simulate finding a real partner through online users
-  const startSearching = () => {
+    return () => unsubscribe();
+  }, [user, toast, onlineUserCount]);
+
+  // Find a random partner from online users
+  const startSearching = async () => {
+    if (!user) return;
+    
     setIsSearching(true);
     setPartner(null);
     setChatMessages([]);
     
-    toast({
-      title: "Looking for video partners",
-      description: "Searching through online users...",
-    });
+    // Update user status to searching
+    try {
+      await update(ref(database, `users/${user.id}`), {
+        status: "searching",
+      });
+      
+      toast({
+        title: "Looking for video partners",
+        description: "Searching through online users...",
+      });
+      
+      // Look for available partners
+      findPartner();
+    } catch (error) {
+      console.error("Error updating user status:", error);
+      toast({
+        title: "Error searching",
+        description: "There was a problem finding chat partners.",
+        variant: "destructive",
+      });
+      setIsSearching(false);
+    }
+  };
+  
+  const findPartner = async () => {
+    if (!user) return;
     
-    // Simulate finding a partner after a random time between 2-7 seconds
-    const searchTime = Math.floor(Math.random() * 5000) + 2000;
-    
-    setTimeout(() => {
-      // Simulate potential connection issues (20% chance of failing)
-      if (Math.random() < 0.2) {
-        toast({
-          title: "Connection failed",
-          description: "The user disconnected. Trying again...",
-          variant: "destructive",
-        });
+    try {
+      const usersRef = ref(database, 'users');
+      const unsubscribe = onValue(usersRef, (snapshot) => {
+        unsubscribe(); // Only need one snapshot
         
-        // Try again after a short delay
-        setTimeout(() => {
+        if (snapshot.exists()) {
+          const usersData = snapshot.val();
+          const availableUsers = Object.values(usersData)
+            .filter((userData: any) => 
+              userData.id !== user.id && 
+              userData.isOnline && 
+              (userData.status === "available" || userData.status === "searching")
+            );
+          
+          if (availableUsers.length > 0) {
+            // Pick a random available user
+            const randomIndex = Math.floor(Math.random() * availableUsers.length);
+            const matchedPartner = availableUsers[randomIndex] as User;
+            
+            // Establish connection between users
+            establishConnection(matchedPartner);
+          } else {
+            // No available users, continue searching
+            setTimeout(() => {
+              if (isSearching) {
+                findPartner();
+              }
+            }, 3000);
+          }
+        } else {
+          // No users found, try again in a few seconds
+          setTimeout(() => {
+            if (isSearching) {
+              findPartner();
+            }
+          }, 3000);
+        }
+      });
+    } catch (error) {
+      console.error("Error finding partner:", error);
+      // Try again after delay
+      setTimeout(() => {
+        if (isSearching) {
           findPartner();
-        }, 1500);
-      } else {
-        findPartner();
+        }
+      }, 3000);
+    }
+  };
+  
+  const establishConnection = async (matchedPartner: User) => {
+    if (!user) return;
+    
+    try {
+      // Update both user statuses to busy
+      await update(ref(database, `users/${user.id}`), { status: "busy" });
+      await update(ref(database, `users/${matchedPartner.id}`), { status: "busy" });
+      
+      // Create a chat connection ID
+      const connectionId = `${user.id.slice(0, 8)}_${matchedPartner.id.slice(0, 8)}_${Date.now()}`;
+      
+      // Create connection object
+      const connectionData = {
+        id: connectionId,
+        participants: {
+          [user.id]: true,
+          [matchedPartner.id]: true
+        },
+        startedAt: serverTimestamp(),
+        active: true
+      };
+      
+      // Add connection to database
+      await set(ref(database, `connections/${connectionId}`), connectionData);
+      
+      // Update local state
+      setPartner(matchedPartner);
+      setIsSearching(false);
+      
+      toast({
+        title: "Partner found!",
+        description: `You are now connected with ${matchedPartner.nickname}`,
+      });
+      
+      // Listen for chat messages in this connection
+      listenForMessages(connectionId);
+      
+    } catch (error) {
+      console.error("Error establishing connection:", error);
+      toast({
+        title: "Connection failed",
+        description: "Failed to establish connection with partner.",
+        variant: "destructive",
+      });
+      setIsSearching(false);
+    }
+  };
+  
+  const listenForMessages = (connectionId: string) => {
+    const messagesRef = ref(database, `messages/${connectionId}`);
+    
+    const unsubscribe = onValue(messagesRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const messagesData = snapshot.val();
+        
+        // Convert messages object to array
+        const messagesList = Object.entries(messagesData).map(([msgId, msgData]) => ({
+          id: msgId,
+          ...(msgData as Omit<ChatMessage, 'id'>)
+        }));
+        
+        // Sort by timestamp
+        messagesList.sort((a: any, b: any) => a.timestamp - b.timestamp);
+        
+        // Update local state
+        setChatMessages(messagesList as ChatMessage[]);
       }
-    }, searchTime);
+    });
+    
+    // Clean up listener when component unmounts
+    return unsubscribe;
   };
   
-  const findPartner = () => {
-    // Generate realistic names with some diversity
-    const names = [
-      "Emma", "Liam", "Olivia", "Noah", "Ava", "Ethan", 
-      "Sophia", "Lucas", "Isabella", "Mason", "Mia", "Logan",
-      "Zoe", "Jackson", "Lily", "Aiden", "Madison", "Carter",
-      "Jamal", "Sofia", "Miguel", "Aisha", "Wei", "Priya",
-      "Mohammed", "Fatima", "José", "Maria", "Hiroshi", "Jin"
-    ];
+  const stopSearching = async () => {
+    if (!user) return;
     
-    // Mock partner data
-    const mockPartner = {
-      id: `user-${Math.floor(Math.random() * 10000)}`,
-      nickname: names[Math.floor(Math.random() * names.length)]
-    };
-    
-    setPartner(mockPartner);
     setIsSearching(false);
     
-    toast({
-      title: "Partner found!",
-      description: `You are now connected with ${mockPartner.nickname}`,
-    });
+    try {
+      await update(ref(database, `users/${user.id}`), {
+        status: "available",
+      });
+      
+      toast({
+        title: "Stopped searching",
+        description: "You've stopped looking for a chat partner.",
+      });
+    } catch (error) {
+      console.error("Error stopping search:", error);
+    }
   };
   
-  const stopSearching = () => {
-    setIsSearching(false);
-    toast({
-      title: "Stopped searching",
-      description: "You've stopped looking for a chat partner.",
-    });
-  };
-  
-  const sendChatRequest = () => {
-    // In a real app, this would send a WebRTC connection request
+  const sendChatRequest = async () => {
+    if (!user || !partner) return;
+    
     toast({
       title: "Starting video chat",
       description: "Establishing secure connection...",
     });
     
-    // Mock auto-accept after a short delay
+    // In a real app, this would initiate WebRTC connection
+    // For demo, we're just simulating acceptance
     setTimeout(() => {
       toast({
         title: "Video chat started",
-        description: `You're now video chatting with ${partner?.nickname}.`,
+        description: `You're now video chatting with ${partner.nickname}.`,
       });
     }, 1000);
   };
   
-  const sendMessage = (text: string) => {
-    if (!user || text.trim() === "") return;
+  const sendMessage = async (text: string) => {
+    if (!user || !partner || text.trim() === "") return;
     
-    const newMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      senderId: user.id,
-      text: text,
-      timestamp: Date.now(),
-    };
-    
-    setChatMessages((prev) => [...prev, newMessage]);
-    
-    // Mock response from partner after 1-3 seconds with higher chance
-    if (partner && Math.random() > 0.1) {
-      const responseTime = Math.floor(Math.random() * 2000) + 1000;
+    try {
+      // Generate connection ID the same way we did in establishConnection
+      const connectionId = `${user.id.slice(0, 8)}_${partner.id.slice(0, 8)}_${Date.now()}`;
       
-      setTimeout(() => {
-        // More contextual responses
-        const responses = [
-          "Hey, nice to meet you!",
-          "How's your day going?",
-          "Where are you from?",
-          "That's interesting!",
-          "Cool! I'm new to this platform.",
-          "I like your style!",
-          "What brings you here today?",
-          "I'm just checking out random chats.",
-          "Have you been using this app for long?",
-          "Do you do this often?",
-          "Haha, that's funny!",
-          "Sorry, I was adjusting my camera. What did you say?",
-          "The video connection is pretty good today!",
-          "I'm from Chicago, you?",
-          "I've been using VibeChat for about a week now.",
-          "Have you met any interesting people here?"
-        ];
-        
-        const partnerMessage: ChatMessage = {
-          id: `msg-${Date.now()}`,
-          senderId: partner.id,
-          text: responses[Math.floor(Math.random() * responses.length)],
-          timestamp: Date.now(),
-        };
-        
-        setChatMessages((prev) => [...prev, partnerMessage]);
-      }, responseTime);
+      // Create message data
+      const messageData = {
+        senderId: user.id,
+        text: text.trim(),
+        timestamp: Date.now(),
+      };
+      
+      // Add message to database
+      const messagesRef = ref(database, `messages/${connectionId}`);
+      await push(messagesRef, messageData);
+      
+    } catch (error) {
+      console.error("Error sending message:", error);
+      toast({
+        title: "Message not sent",
+        description: "There was a problem sending your message.",
+        variant: "destructive",
+      });
     }
   };
   
